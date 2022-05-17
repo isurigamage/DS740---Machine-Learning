@@ -1,0 +1,558 @@
+---
+title: "Analysis of Athletes data"
+author: "Isuri Willaddara Gamage"
+date: "10/26/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages here.
+```{r, message=FALSE}
+library(FNN)
+library(randomForest)
+library(dplyr)
+library(caret)
+library(glmnet)
+
+#visualizations
+library(ggformula)
+library(ROCR)
+```
+
+Load data
+```{r}
+Athlete_data = read.csv("Athletes.csv")
+head(Athlete_data)
+summary(Athlete_data)
+#count number of rows of each class
+nrow(Athlete_data[Athlete_data$Sport_group == "ball",])
+nrow(Athlete_data[Athlete_data$Sport_group == "track",])
+nrow(Athlete_data[Athlete_data$Sport_group == "water/gym",])
+
+```
+
+```{r}
+#identify outliers
+dat = subset(Athlete_data, select = -c(Sport_group,Sex) )
+boxplot(dat)
+```
+
+Data Analysis and Cleaning
+```{r}
+##################
+##Unlike most algorithms, KNN is a non-parametric model which means that it does not make any assumptions about the data set. This makes the algorithm more effective since it can handle realistic data
+#################
+#weight and height represent the BMI therefore I will remove the Wt and Ht variables from the data set
+
+Athlete = subset(Athlete_data, select = -c(Wt,Ht) )
+
+dim(Athlete) # number of rows and variables in the dataset
+```
+```{r}
+#create training set and test set
+set.seed(10)
+groups = c(rep(1, 141), rep(2, 61)) # 1 represents the training set
+random_groups = sample(groups, 202)
+
+in_train = (random_groups == 1)
+```
+
+Standardize predictors except variable Sex
+```{r}
+#scale predictors except Sex
+quant_train_std = scale(Athlete[in_train, c(1,3:10)])
+#head(quant_train_std)
+
+#standardize predictors from the validation data
+quant_test_std = scale(Athlete[!in_train,c(1,3:10)], 
+    center = attr(quant_train_std, "scaled:center"),
+    scale = attr(quant_train_std, "scaled:scale"))
+
+#combine with Sex variable
+x_train = cbind(Athlete$Sex[in_train],
+                quant_train_std)
+x_test = cbind(Athlete$Sex[!in_train],
+               quant_test_std)
+
+head(x_train)
+```
+
+```{r}
+#square root of 141 is 11.8. Therefore I am creating a model with k = 11
+#building the model
+predictions = knn(train = x_train, 
+                  test  = x_test,
+                  cl = Athlete$Sport_group[in_train],
+                  k = 11)
+
+head(predictions)
+
+table(predictions, Athlete$Sport_group[!in_train])
+
+```
+
+```{r}
+#find the best k values to maximize accuracy
+K_vals = seq(1, 50, by = 1)
+accuracy = numeric(length = length(K_vals))
+
+for(ii in 1:length(K_vals)){
+  predictions = knn(train = x_train, 
+                  test  = x_test,
+                  cl = Athlete[in_train, 1],
+                  k = K_vals[ii])
+  conf_mat = table(predictions,
+                 Athlete$Sport_group[!in_train])
+  accuracy[ii] = sum(diag(conf_mat))/61
+}
+#plot the accuracy line
+gf_line(accuracy ~ K_vals, lwd = 1)
+
+#get the maximum accuracy and k value
+max(accuracy)
+K_vals[which.max(accuracy)]
+```
+
+Build a model with Body Fat , BMI and Sex using KNN
+
+```{r}
+#scale predictors Bfat and BMI
+quant_train_std.2 = scale(Athlete[in_train, c(1,9)])
+#head(quant_train_std)
+
+#standardize predictors from the validation data
+quant_test_std.2 = scale(Athlete[!in_train,c(1,9)], 
+    center = attr(quant_train_std.2, "scaled:center"),
+    scale = attr(quant_train_std.2, "scaled:scale"))
+
+#combine with Sex variable
+x_train.2 = cbind(Athlete$Sex[in_train],
+                quant_train_std.2)
+x_test.2 = cbind(Athlete$Sex[!in_train],
+               quant_test_std.2)
+
+head(x_train.2)
+```
+
+```{r}
+#building the model
+predictions.2 = knn(train = x_train.2, 
+                  test  = x_test.2,
+                  cl = Athlete$Sport_group[in_train],
+                  k = 11)
+
+head(predictions.2)
+
+table(predictions.2, Athlete$Sport_group[!in_train])
+```
+
+```{r}
+#find the best k values to maximize accuracy
+#K_vals = seq(1, 50, by = 1)
+accuracy.2 = numeric(length = length(K_vals))
+
+for(ii in 1:length(K_vals)){
+  predictions.2 = knn(train = x_train.2, 
+                  test  = x_test.2,
+                  cl = Athlete[in_train, 1],
+                  k = K_vals[ii])
+  conf_mat = table(predictions.2,
+                 Athlete$Sport_group[!in_train])
+  accuracy.2[ii] = sum(diag(conf_mat))/61
+}
+#plot the accuracy line
+gf_line(accuracy.2 ~ K_vals, lwd = 1)
+
+#get the maximum accuracy and k value
+max(accuracy.2)
+K_vals[which.max(accuracy.2)]
+```
+
+```{r}
+#test body fat from 6 to 20, BMI from 18 to 25
+bfat_to_check = seq(6, 20, by = 1)#normal body fat range
+bmi_to_check = seq(18, 25, by = 1)#normal BMI
+sex_to_check = c(0, 1)
+
+#create data frame with example data
+example_data = expand.grid(sex_to_check, 
+                           bfat_to_check, 
+                           bmi_to_check)
+
+head(example_data)
+
+#standardized bfat and bmi
+example_std = scale(example_data[ , 2:3], 
+    center = attr(quant_train_std.2, "scaled:center"),
+    scale = attr(quant_train_std.2, "scaled:scale"))
+
+#combine standardized variables with Sex
+x_example = cbind(example_data[ ,1],
+                  example_std)
+
+head(x_example)
+```
+```{r}
+set.seed(10)
+predictions = knn(train = x_train.2, 
+                  test  = x_example,
+                  cl = Athlete$Sport_group[in_train],
+                  k = 31)
+
+example_data <- example_data %>%
+  mutate(pred = predictions) %>%
+  rename(Sex = Var1,
+         BodyFat = Var2,
+         BMI = Var3)
+
+example_data %>%
+  filter(Sex == 0) %>%
+  gf_point(BodyFat ~ BMI, color =~ pred) %>%
+  gf_labs(title = "Male")
+
+example_data %>%
+  filter(Sex == 1) %>%
+  gf_point(BodyFat ~ BMI, color =~ pred) %>%
+  gf_labs(title = "Female")
+
+```
+Random Forests and bagging Model Building
+
+There are $p=10$ predictor variables, so $\sqrt{p} = 3.16$.  We'll test values of `mtry` around this value:  1, 2, 3, 4, 5.  If the optimal value of `mtry` turns out to be 1 or 5, we'll expand the range of values we're testing.
+
+```{r}
+set.seed(10)
+data_used = Athlete
+
+ctrl = trainControl(method = "cv", number = 5)
+athlete_caret = train(Sport_group ~ ., 
+             data = data_used,
+             method = "rf",
+             tuneGrid = expand.grid(mtry = c(1, 2, 3, 4, 5, 10)),
+             trControl = ctrl)
+
+athlete_caret
+#The highest accuracy of the model is mtry = 2 
+```
+```{r}
+#checking the number of trees
+plot(athlete_caret$finalModel)
+legend("topright", 
+       colnames(athlete_caret$finalModel$err.rate), 
+       col = 1:4, lty = 1:4)
+#The graph levels out, so 500 trees is adequate.
+```
+Variable importance:
+```{r}
+importance(athlete_caret$finalModel)
+varImpPlot(athlete_caret$finalModel)
+varImp(athlete_caret)
+#sex variable does not important to predict sport_group. KNN example data shows there is no significant difference of Male and Female category to predict sport group. Therefore I will remove the Sex variable from the data frame and recalculate hyper parameters. 
+```
+Remove Sex variable and recalculate K and mtry 
+
+```{r}
+Athlete_new = subset(Athlete, select = -c(Sex))
+head(Athlete_new)
+```
+
+KNN
+```{r}
+#scale predictors
+train_new = scale(Athlete_new[in_train, c(1:9)])
+
+#standardize predictors from the validation data
+test_new = scale(Athlete_new[!in_train,c(1:9)], 
+    center = attr(train_new, "scaled:center"),
+    scale = attr(train_new, "scaled:scale"))
+
+#find the best k values to maximize accuracy
+K_vals = seq(1, 50, by = 1)
+accuracy_new = numeric(length = length(K_vals))
+
+for(ii in 1:length(K_vals)){
+  predictions = knn(train = train_new, 
+                  test  = test_new,
+                  cl = Athlete_new[in_train, 1],
+                  k = K_vals[ii])
+  conf_mat = table(predictions,
+                 Athlete_new$Sport_group[!in_train])
+  accuracy_new[ii] = sum(diag(conf_mat))/61
+}
+#plot the accuracy line
+gf_line(accuracy_new ~ K_vals, lwd = 1)
+
+#get the maximum accuracy and k value
+max(accuracy_new)
+K_vals[which.max(accuracy_new)]
+```
+
+Random Forest
+```{r}
+set.seed(10)
+data_used = Athlete_new
+
+ctrl = trainControl(method = "cv", number = 10)
+athlete_caret_new = train(Sport_group ~ ., 
+             data = data_used,
+             method = "rf",
+             tuneGrid = expand.grid(mtry = c(4,5,6,7,8,9,10,11,12)),
+             trControl = ctrl)
+
+athlete_caret_new
+#The highest accuracy of the model is mtry = 9 and mtry = 4. Therefore expanding the range from 4 to 12 
+```
+
+```{r}
+#checking the number of trees
+plot(athlete_caret_new$finalModel)
+legend("topright", 
+       colnames(athlete_caret_new$finalModel$err.rate), 
+       col = 1:4, lty = 1:4)
+#The graph levels out, so 500 trees is adequate.
+
+#variable importance
+importance(athlete_caret_new$finalModel)
+varImpPlot(athlete_caret_new$finalModel)
+varImp(athlete_caret_new)
+```
+
+Single layer of 10-fold cross validation
+```{r}
+n = dim(Athlete)[1]
+names(Athlete)
+Athlete$Sport_group = factor(Athlete$Sport_group)
+
+#KNN, Best values find before 43 and 45
+allkNN = 35:50
+#Random Forest, best values find before 4,6,8,9
+allMtry = 4:12
+
+#define the split into training set (typically of size about 2/3 of data) and validation set (of size about 1/3)
+n.train = round(n*2/3); n.train
+n.valid = n-n.train; n.valid
+set.seed(10)
+whichtrain = sample(1:n,n.train)  #produces list of data to use in training
+include.train = is.element(1:n,whichtrain)  
+include.valid = !is.element(1:n,whichtrain)  
+
+#just one split into training and validation sets
+traindata = Athlete[include.train,]
+testdata = Athlete[include.valid,]
+
+#build 3 models of kNN and random forest with and without Sex variable
+ModelList = list(Sport_group ~ . -Sex, Sport_group ~.)
+
+#specify data to be used
+dataused=traindata
+
+# set up training method
+set.seed(11)
+training = trainControl(method = "cv", number = 10)
+
+# cross-validation of kNN models without Sex (with standardization)
+fit_caret_kNN1 = train(ModelList[[1]],
+                        data = dataused,
+                        method = "knn",
+                        trControl = training,
+                        preProcess = c("center","scale"),
+                        tuneGrid = expand.grid(k = allkNN))
+#output
+#fit_caret_kNN1
+
+# cross-validation of kNN models with all variables (with standardization)
+fit_caret_kNN2 = train(ModelList[[2]],
+                        data = dataused,
+                        method = "knn",
+                        trControl = training,
+                        preProcess = c("center","scale"),
+                        tuneGrid = expand.grid(k = allkNN))
+#output
+#fit_caret_kNN2
+
+# cross-validation of Random forest models without Sex
+fit_caret_rf1 = train(ModelList[[1]], 
+             data = dataused,
+             method = "rf",
+             trControl = training,
+             tuneGrid = expand.grid(mtry = allMtry))
+#output
+#fit_caret_rf1
+
+# cross-validation of Random forest models without Sex
+fit_caret_rf2 = train(ModelList[[2]], 
+             data = dataused,
+             method = "rf",
+             trControl = training,
+             tuneGrid = expand.grid(mtry = allMtry))
+#output
+fit_caret_rf2
+
+############# identify selected model to fit to full data #############
+# all best models
+all_Accuracy = c(fit_caret_kNN1$results$Accuracy,
+                 fit_caret_kNN2$results$Accuracy,
+                 fit_caret_rf1$results$Accuracy,
+                 fit_caret_rf2$results$Accuracy)
+
+all_Error = 1-all_Accuracy
+bestmodels = (1:50)[all_Error == min(all_Error)]
+bestmodel = ifelse(length(bestmodels)==1,bestmodels,sample(bestmodels,1))
+bestmodel
+#print(all_Error)
+#best model is Random Forest model with Sex variable and mtry = 8
+#final model 
+fit_caret_rf2$finalModel
+```
+
+Model Selection - Double cross validation
+```{r}
+#define the cross-validation splits 
+nfolds = 5 
+groups = rep(1:nfolds,length=n)  #produces list of group labels
+set.seed(10)
+cvgroups = sample(groups,n)  #orders randomly, with seed (10) 
+
+allpredictedCV = rep(NA,n)
+
+### model assessment OUTER shell ###
+for (j in 1:nfolds)  {  #be careful not to re-use loop indices
+  groupj = (cvgroups == j)
+  
+  # define the training set for outer loop
+  trainxy = Athlete[!groupj,]
+  
+  #define the validation set for outer loop
+  #testxy = Athlete[groupj,]
+  #testx1 <- testxy %>% select(-Sport_group, -Sex)
+  #testx2 <- testxy %>% select(-Sport_group)
+  
+  #build 3 models of kNN and random forest with and without Sex variable
+  ModelList = list(Sport_group ~ . -Sex, Sport_group ~.)
+
+  training = trainControl(method = "cv", number = 10)
+  
+  ##########model selection
+  
+  # cross-validation of kNN models without Sex (with standardization)
+  fit_caret_kNN1 = train(ModelList[[1]],
+                          data = trainxy,
+                          method = "knn",
+                          trControl = training,
+                          preProcess = c("center","scale"),
+                          tuneGrid = expand.grid(k = allkNN))
+  #output
+  #fit_caret_kNN1
+  
+  # cross-validation of kNN models with all variables (with standardization)
+  fit_caret_kNN2 = train(ModelList[[2]],
+                          data = trainxy,
+                          method = "knn",
+                          trControl = training,
+                          preProcess = c("center","scale"),
+                          tuneGrid = expand.grid(k = allkNN))
+  #output
+  #fit_caret_kNN2
+  
+  # cross-validation of Random forest models without Sex
+  fit_caret_rf1 = train(ModelList[[1]], 
+               data = trainxy,
+               method = "rf",
+               trControl = training,
+               tuneGrid = expand.grid(mtry = allMtry))
+  #output
+  fit_caret_rf1
+  
+  # cross-validation of Random forest models without Sex
+  fit_caret_rf2 = train(ModelList[[2]], 
+               data = trainxy,
+               method = "rf",
+               trControl = training,
+               tuneGrid = expand.grid(mtry = allMtry))
+  #output
+  fit_caret_rf2
+  
+  ############# identify selected model to fit to full data #############
+  # all best models
+  all_Accuracy = c(fit_caret_kNN1$results$Accuracy,
+                   fit_caret_kNN2$results$Accuracy,
+                   fit_caret_rf1$results$Accuracy,
+                   fit_caret_rf2$results$Accuracy)
+  
+  all_Error = 1-all_Accuracy
+  bestmodels = (1:50)[all_Error == min(all_Error)]
+  bestmodel = ifelse(length(bestmodels)==1,bestmodels,sample(bestmodels,1))
+  print(paste("Best model at outer loop",j,"is",bestmodel))
+}
+
+#best models are Random Forest models with mtry = 7, mtry = 6 and mtry = 11 without Sex variable and mtry = 5 and mtry = 8 with Sex variable
+#selected final model is fit_caret_rf2$finalModel
+```
+
+Test the accuracy of the Random Forest model for test data for each class using AUC
+
+```{r}
+set.seed(10)
+rf_classifier = randomForest(Sport_group ~ ., data=traindata, ntree=500, mtry=8, importance=TRUE)
+prediction_for_table <- predict(rf_classifier,testdata[,-11])
+table(observed=testdata[,11],predicted=prediction_for_table)
+
+# Calculate the probability of new observations belonging to each class
+# prediction_for_roc_curve will be a matrix with dimensions data_set_size x number_of_classes
+prediction_for_roc_curve <- predict(rf_classifier,testdata[,-11],type="prob")
+# Use pretty colours:
+pretty_colours <- c("#F8766D","#00BA38","#619CFF")
+# Specify the different classes 
+classes <- levels(testdata$Sport_group)
+# For each class
+for (i in 1:3)
+{
+ # Define which observations belong to class[i]
+ true_values <- ifelse(testdata[,11]==classes[i],1,0)
+ # Assess the performance of classifier for class[i]
+ pred <- prediction(prediction_for_roc_curve[,i],true_values)
+ perf <- performance(pred, "tpr", "fpr")
+ if (i==1)
+ {
+     plot(perf,main="ROC Curve",col=pretty_colours[i]) 
+ }
+ else
+ {
+     plot(perf,main="ROC Curve",col=pretty_colours[i],add=TRUE) 
+ }
+ # Calculate the AUC and print it to screen
+ auc.perf <- performance(pred, measure = "auc")
+ print(auc.perf@y.values)
+}
+
+#green curve - track
+#blue curve - ball
+#red curve - water/gym
+```
+
+```{r}
+#fit full data set to final model
+final_model <- randomForest(Sport_group ~ ., data = Athlete, ntree = 500, mtry = 8, importance = TRUE)
+final_model
+final_model$importance
+importance(final_model)
+varImpPlot(final_model)
+
+```
+
+
+```{r}
+#relationship between body fat and SSF
+g <- ggplot(Athlete, aes(Bfat, SSF))
+
+# Scatterplot
+g + geom_point() + 
+  geom_smooth(method="lm", se=F) +
+  labs(y="Body Fat", 
+       x="sum of skin folds", 
+       title="Scatterplot of Body fat vs. SSF")
+
+```
